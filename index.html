@@ -170,7 +170,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
     <script>
         // Hidden URL - embedded in the script
-        const SECRET_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1&pp=ygUJcmljayByb2xsoAcB";
+        const SECRET_URLS = ["https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1&pp=ygUJcmljayByb2xsoAcB", "https://www.youtube.com/watch?v=A5J8FsVo1tM&pp=ygUPc2lyZW5hIHBvbGl6aWEg", "https://www.youtube.com/watch?v=FBVrgBNzC8k&pp=ygUNYmVlcCBhY3VzdGljbw%3D%3D", "https://youtu.be/XZ7f4HYBA7I?si=m1dUmfkU40l4eVVD"];
+        
+        const SECRET_URL = SECRET_URLS[Math.floor(Math.random() * SECRET_URLS.length)];
         
         let pieces = [];
         let draggedPiece = null;
