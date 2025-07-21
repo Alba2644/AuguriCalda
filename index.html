@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scannable Puzzle QR Code</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Arial', sans-serif;
+        }
+        .game-container {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            text-align: center;
+            backdrop-filter: blur(10px);
+        }
+        .puzzle-area {
+            position: relative;
+            width: 600px;
+            height: 600px;
+            margin: 20px auto;
+            background: #f8f9fa;
+            border: 3px solid #333;
+            border-radius: 10px;
+            overflow: visible;
+        }
+        .puzzle-piece {
+            position: absolute;
+            cursor: grab;
+            transition: all 0.2s ease;
+            border: 2px solid #666;
+            border-radius: 8px;
+            box-shadow: 2px 2px 8px rgba(0,0,0,0.3);
+            background-size: cover;
+            background-repeat: no-repeat;
+        }
+        .puzzle-piece:hover {
+            transform: scale(1.05);
+            z-index: 1000;
+            border-color: #4CAF50;
+        }
+        .puzzle-piece.dragging {
+            cursor: grabbing;
+            transform: scale(1.1);
+            z-index: 1001;
+            border-color: #ff6b6b;
+        }
+        .puzzle-piece.correct-position {
+            animation: correctPlace 0.5s ease;
+            border-color: #4CAF50;
+        }
+        @keyframes correctPlace {
+            0% { transform: scale(1.1); }
+            50% { transform: scale(1.2); box-shadow: 0 0 20px #4CAF50; }
+            100% { transform: scale(1); }
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 5px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        .completion-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #4CAF50;
+            color: white;
+            padding: 20px 40px;
+            border-radius: 10px;
+            font-size: 24px;
+            font-weight: bold;
+            display: none;
+            z-index: 2000;
+            animation: celebration 2s ease;
+        }
+        @keyframes celebration {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.1); }
+        }
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            background: #e0e0e0;
+            border-radius: 5px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #45a049);
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        p {
+            color: #666;
+            margin: 10px 0;
+        }
+        .qr-preview {
+            margin: 10px 0;
+            opacity: 0.3;
+            transition: opacity 0.3s ease;
+        }
+        .qr-preview:hover {
+            opacity: 1;
+        }
+        #qrCanvas {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1>🧩 Scannable QR Code Puzzle</h1>
+        <p>Drag rectangular pieces to complete the QR code - it will be fully scannable!</p>
+        
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <p id="progressText">Progress: 0/25 pieces in correct position</p>
+        
+        <div class="puzzle-area" id="puzzleArea"></div>
+        
+        <div class="controls">
+            <button onclick="shufflePieces()">🔀 Shuffle Pieces</button>
+            <button onclick="showHint()">💡 Show Hint (2s)</button>
+            <button onclick="autoSolve()">🔧 Auto Solve</button>
+            <button onclick="showPreview()">👁️ Preview QR</button>
+        </div>
+        
+        <canvas id="qrCanvas" width="500" height="500"></canvas>
+        <div class="qr-preview" id="qrPreview" style="display: none;">
+            <p>QR Code Preview (hover to see clearly):</p>
+        </div>
+        
+        <p><strong>Complete the puzzle to scan the QR code!</strong></p>
+    </div>
+    
+    <div class="completion-message" id="completionMessage">
+        🎉 Puzzle Completed! QR Code is now scannable! 🎉
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+    <script>
+        // Hidden URL - embedded in the script
+        const SECRET_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1&pp=ygUJcmljayByb2xsoAcB";
+        
+        let pieces = [];
+        let draggedPiece = null;
+        let dragOffset = { x: 0, y: 0 };
+        const gridSize = 5; // 5x5 grid for larger, more manageable pieces
+        const pieceSize = 120; // Larger pieces for better QR code preservation
+        const puzzleArea = document.getElementById('puzzleArea');
+        let qrCanvas = null;
+        let qrImageData = null;
+        
+        function generateQRCode() {
+            const canvas = document.getElementById('qrCanvas');
+            const qr = new QRious({
+                element: canvas,
+                value: SECRET_URL,
+                size: 500,
+                background: 'white',
+                foreground: 'black',
+                level: 'H' // High error correction for better scannability
+            });
+            
+            qrCanvas = canvas;
+            const ctx = canvas.getContext('2d');
+            qrImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            
+            return canvas;
+        }
+        
+        function createPuzzlePiece(row, col) {
+            const piece = document.createElement('div');
+            piece.className = 'puzzle-piece';
+            piece.dataset.row = row;
+            piece.dataset.col = col;
+            
+            // Calculate correct position
+            const correctX = col * pieceSize;
+            const correctY = row * pieceSize;
+            piece.dataset.correctX = correctX;
+            piece.dataset.correctY = correctY;
+            
+            // Set piece size
+            piece.style.width = pieceSize + 'px';
+            piece.style.height = pieceSize + 'px';
+            
+            // Create a canvas for this piece
+            const pieceCanvas = document.createElement('canvas');
+            pieceCanvas.width = pieceSize;
+            pieceCanvas.height = pieceSize;
+            const pieceCtx = pieceCanvas.getContext('2d');
+            
+            // Extract the portion of the QR code for this piece
+            const sourceX = col * (qrCanvas.width / gridSize);
+            const sourceY = row * (qrCanvas.height / gridSize);
+            const sourceWidth = qrCanvas.width / gridSize;
+            const sourceHeight = qrCanvas.height / gridSize;
+            
+            pieceCtx.drawImage(
+                qrCanvas,
+                sourceX, sourceY, sourceWidth, sourceHeight,
+                0, 0, pieceSize, pieceSize
+            );
+            
+            // Set the piece background to the canvas image
+            piece.style.backgroundImage = `url(${pieceCanvas.toDataURL()})`;
+            piece.style.backgroundSize = 'cover';
+            
+            // Add drag event listeners
+            piece.addEventListener('mousedown', startDrag);
+            piece.addEventListener('dragstart', e => e.preventDefault());
+            
+            // Add piece number for identification
+            const label = document.createElement('div');
+            label.style.position = 'absolute';
+            label.style.top = '5px';
+            label.style.right = '5px';
+            label.style.background = 'rgba(0,0,0,0.7)';
+            label.style.color = 'white';
+            label.style.padding = '2px 6px';
+            label.style.borderRadius = '10px';
+            label.style.fontSize = '12px';
+            label.style.fontWeight = 'bold';
+            label.textContent = row * gridSize + col + 1;
+            piece.appendChild(label);
+            
+            return piece;
+        }
+        
+        function initializePuzzle() {
+            generateQRCode();
+            
+            pieces = [];
+            puzzleArea.innerHTML = '';
+            
+            for (let row = 0; row < gridSize; row++) {
+                for (let col = 0; col < gridSize; col++) {
+                    const piece = createPuzzlePiece(row, col);
+                    pieces.push(piece);
+                    puzzleArea.appendChild(piece);
+                }
+            }
+            
+            shufflePieces();
+        }
+        
+        function shufflePieces() {
+            pieces.forEach(piece => {
+                // Place pieces around the puzzle area but not on top
+                let randomX, randomY;
+                do {
+                    randomX = Math.random() * (puzzleArea.offsetWidth - pieceSize);
+                    randomY = Math.random() * (puzzleArea.offsetHeight - pieceSize);
+                } while (
+                    randomX >= 0 && randomX <= puzzleArea.offsetWidth - pieceSize * gridSize &&
+                    randomY >= 0 && randomY <= puzzleArea.offsetHeight - pieceSize * gridSize
+                );
+                
+                piece.style.left = randomX + 'px';
+                piece.style.top = randomY + 'px';
+                piece.classList.remove('correct-position');
+            });
+            updateProgress();
+        }
+        
+        function startDrag(e) {
+            draggedPiece = e.currentTarget;
+            draggedPiece.classList.add('dragging');
+            
+            const rect = draggedPiece.getBoundingClientRect();
+            const containerRect = puzzleArea.getBoundingClientRect();
+            
+            dragOffset.x = e.clientX - rect.left;
+            dragOffset.y = e.clientY - rect.top;
+            
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', stopDrag);
+        }
+        
+        function drag(e) {
+            if (!draggedPiece) return;
+            
+            const containerRect = puzzleArea.getBoundingClientRect();
+            const x = e.clientX - containerRect.left - dragOffset.x;
+            const y = e.clientY - containerRect.top - dragOffset.y;
+            
+            draggedPiece.style.left = x + 'px';
+            draggedPiece.style.top = y + 'px';
+        }
+        
+        function stopDrag() {
+            if (!draggedPiece) return;
+            
+            const piece = draggedPiece;
+            const correctX = parseInt(piece.dataset.correctX);
+            const correctY = parseInt(piece.dataset.correctY);
+            const currentX = parseInt(piece.style.left);
+            const currentY = parseInt(piece.style.top);
+            
+            // Check if piece is close to correct position
+            const threshold = 40;
+            if (Math.abs(currentX - correctX) < threshold && Math.abs(currentY - correctY) < threshold) {
+                piece.style.left = correctX + 'px';
+                piece.style.top = correctY + 'px';
+                piece.classList.add('correct-position');
+                
+                // Remove the piece number when correctly placed
+                const label = piece.querySelector('div');
+                if (label) label.style.display = 'none';
+                
+                // Check if puzzle is complete
+                setTimeout(checkCompletion, 100);
+            }
+            
+            piece.classList.remove('dragging');
+            draggedPiece = null;
+            
+            document.removeEventListener('mousemove', drag);
+            document.removeEventListener('mouseup', stopDrag);
+            
+            updateProgress();
+        }
+        
+        function updateProgress() {
+            const correctPieces = pieces.filter(piece => {
+                const correctX = parseInt(piece.dataset.correctX);
+                const correctY = parseInt(piece.dataset.correctY);
+                const currentX = parseInt(piece.style.left);
+                const currentY = parseInt(piece.style.top);
+                return Math.abs(currentX - correctX) < 5 && Math.abs(currentY - correctY) < 5;
+            }).length;
+            
+            const percentage = (correctPieces / pieces.length) * 100;
+            document.getElementById('progressFill').style.width = percentage + '%';
+            document.getElementById('progressText').textContent = `Progress: ${correctPieces}/${pieces.length} pieces in correct position`;
+        }
+        
+        function checkCompletion() {
+            const correctPieces = pieces.filter(piece => {
+                const correctX = parseInt(piece.dataset.correctX);
+                const correctY = parseInt(piece.dataset.correctY);
+                const currentX = parseInt(piece.style.left);
+                const currentY = parseInt(piece.style.top);
+                return Math.abs(currentX - correctX) < 5 && Math.abs(currentY - correctY) < 5;
+            }).length;
+            
+            if (correctPieces === pieces.length) {
+                document.getElementById('completionMessage').style.display = 'block';
+                
+                // Hide all piece borders for clean scanning
+                pieces.forEach(piece => {
+                    piece.style.border = 'none';
+                    piece.style.borderRadius = '0';
+                    piece.style.boxShadow = 'none';
+                    const label = piece.querySelector('div');
+                    if (label) label.style.display = 'none';
+                });
+                
+                setTimeout(() => {
+                    document.getElementById('completionMessage').style.display = 'none';
+                }, 5000);
+            }
+        }
+        
+        function showHint() {
+            pieces.forEach(piece => {
+                const correctX = parseInt(piece.dataset.correctX);
+                const correctY = parseInt(piece.dataset.correctY);
+                
+                // Temporarily show correct position
+                const originalLeft = piece.style.left;
+                const originalTop = piece.style.top;
+                const originalOpacity = piece.style.opacity;
+                
+                piece.style.left = correctX + 'px';
+                piece.style.top = correctY + 'px';
+                piece.style.opacity = '0.7';
+                piece.style.border = '3px solid #ff6b6b';
+                
+                setTimeout(() => {
+                    piece.style.left = originalLeft;
+                    piece.style.top = originalTop;
+                    piece.style.opacity = originalOpacity;
+                    piece.style.border = '2px solid #666';
+                }, 2000);
+            });
+        }
+        
+        function autoSolve() {
+            pieces.forEach((piece, index) => {
+                setTimeout(() => {
+                    const correctX = parseInt(piece.dataset.correctX);
+                    const correctY = parseInt(piece.dataset.correctY);
+                    piece.style.left = correctX + 'px';
+                    piece.style.top = correctY + 'px';
+                    piece.classList.add('correct-position');
+                    
+                    // Hide piece numbers
+                    const label = piece.querySelector('div');
+                    if (label) label.style.display = 'none';
+                    
+                    if (index === pieces.length - 1) {
+                        setTimeout(checkCompletion, 100);
+                    }
+                }, index * 100);
+            });
+            
+            setTimeout(updateProgress, pieces.length * 100 + 100);
+        }
+        
+        function showPreview() {
+            const preview = document.getElementById('qrPreview');
+            if (preview.style.display === 'none') {
+                const previewCanvas = qrCanvas.cloneNode();
+                const qr = new QRious({
+                    element: previewCanvas,
+                    value: SECRET_URL,
+                    size: 200,
+                    background: 'white',
+                    foreground: 'black',
+                    level: 'H'
+                });
+                
+                preview.innerHTML = '<p>QR Code Preview (hover to see clearly):</p>';
+                preview.appendChild(previewCanvas);
+                preview.style.display = 'block';
+            } else {
+                preview.style.display = 'none';
+            }
+        }
+        
+        // Initialize the puzzle when page loads
+        window.addEventListener('load', initializePuzzle);
+    </script>
+</body>
+</html>
